@@ -1,0 +1,10 @@
+name: blast_env
+channels:
+  - bioconda
+  - conda-forge
+  - defaults
+dependencies:
+  - blast
+  - python
+  - ncbi-datasets-cli
+  - mafft
