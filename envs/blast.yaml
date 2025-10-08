@@ -4,7 +4,10 @@ channels:
   - conda-forge
   - defaults
 dependencies:
+  - usher
   - blast
   - python
   - ncbi-datasets-cli
   - mafft
+  - pip
+  - ete3
