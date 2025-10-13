@@ -10,4 +10,5 @@ dependencies:
   - ncbi-datasets-cli
   - mafft
   - pip
-  - ete3
+  - pip:
+      - taxoniumtools

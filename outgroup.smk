@@ -4,7 +4,10 @@ configfile: "config.yaml"
 
 rule all:
     input:
-        expand(os.path.join(config["data_dir"], "{virus}/outgroup_optimized.pb.gz"), virus=config["viruses"][:3])
+        expand(os.path.join(config["data_dir"], "{virus}/rerooted_outgroup_optimized.pb.gz"), virus=config["viruses"][:5])
+        #expand(os.path.join(config["data_dir"], "{virus}/{virus}_rerooted_outgroup_optimized.jsonl.gz"), virus=config["viruses"])
+        #expand("blast/{virus}_blast.txt", virus=config["viruses"])
+        #expand(os.path.join(config["data_dir"], "{virus}/{virus}_rerooted_outgroup_optimized.jsonl.gz"), virus=config["viruses"][:10])
         #expand("outgroup/{virus}_outgroup.vcf", virus=config["viruses"][:3])
         #expand(os.path.join(config["data_dir"], "{virus}/outgroup_optimized.pb.gz"), virus=config["viruses"][:3])
 
@@ -103,6 +106,29 @@ rule usher:
     shell:
         """
         usher-sampled -i {input.tree} -v outgroup/{wildcards.virus}_outgroup.vcf -o {output.newtree}
+        """
+
+rule reroot:
+    input:
+        tree = os.path.join(config["data_dir"], "{virus}/outgroup_optimized.pb.gz"),
+        og="outgroup/{virus}_outgroup.fasta"
+    output:
+        newtree = os.path.join(config["data_dir"], "{virus}/rerooted_outgroup_optimized.pb.gz")
+    shell:
+        """
+        newroot=$(head -n 1 {input.og} | cut -d ' ' -f1 | perl -pe 's/>//g')
+        echo $newroot
+        matUtils extract -i {input.tree} -y $newroot -o {output.newtree}
+        """
+
+rule convert:
+    input:
+        tree = os.path.join(config["data_dir"], "{virus}/rerooted_outgroup_optimized.pb.gz")
+    output:
+        jsonl = os.path.join(config["data_dir"], "{virus}/{virus}_rerooted_outgroup_optimized.jsonl.gz")
+    shell:
+        """
+        usher_to_taxonium -i {input.tree} -o {output.jsonl}
         """
 
 
