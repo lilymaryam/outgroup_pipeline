@@ -5,6 +5,7 @@ channels:
   - defaults
 dependencies:
   - usher
+  - entrez-direct
   - blast
   - python
   - ncbi-datasets-cli

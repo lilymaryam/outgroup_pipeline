@@ -1,7 +1,13 @@
 data_dir: 
   "../reroot_pipeline/viral_usher_trees/trees/"
-database:
+refseq_database:
   "./ncbi_viral_blast/viral_taxid_db"
+header:
+  "strain,accession,isolate,country,location,date,length,biosample,host"
+
+genbank_database:
+  "../nt_viruses/nt_viruses"
+
 viruses:
   - Adeno_associated_virus_1
   - adeno_associated_virus_2

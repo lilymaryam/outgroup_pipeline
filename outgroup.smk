@@ -4,7 +4,17 @@ configfile: "config.yaml"
 
 rule all:
     input:
-        expand(os.path.join(config["data_dir"], "{virus}/rerooted_outgroup_optimized.pb.gz"), virus=config["viruses"][:5])
+        expand("logs/{virus}_status.log", virus=config["viruses"])
+
+        #expand("blast/{virus}_blast.txt", virus=config["viruses"][:10])
+
+        #expand("logs/{virus}_status.log", virus=config["viruses"])
+        #expand(os.path.join(config["data_dir"], "{virus}/{virus}_rerooted_outgroup_optimized.jsonl.gz"), virus=config["viruses"])
+
+        #expand("blast/{virus}_blast.txt", virus=config["viruses"])
+
+        #expand(os.path.join(config["data_dir"], "{virus}/{virus}_rerooted_outgroup_optimized.jsonl.gz"), virus=config["viruses"])
+        #expand(os.path.join(config["data_dir"], "{virus}/rerooted_outgroup_optimized.pb.gz"), virus=config["viruses"][:15])
         #expand(os.path.join(config["data_dir"], "{virus}/{virus}_rerooted_outgroup_optimized.jsonl.gz"), virus=config["viruses"])
         #expand("blast/{virus}_blast.txt", virus=config["viruses"])
         #expand(os.path.join(config["data_dir"], "{virus}/{virus}_rerooted_outgroup_optimized.jsonl.gz"), virus=config["viruses"][:10])
@@ -17,9 +27,6 @@ rule get_virus:
         tsv = os.path.join(config["data_dir"], "{virus}/config.toml")
     output:
         fna="fastas/{virus}.fasta", taxid="taxids/{virus}.txt"
-    log: "logs/get_{virus}.log"
-    #conda:
-    #    "envs/blast.yaml"
     shell:
         """
         mkdir -p fastas
@@ -30,7 +37,7 @@ rule get_virus:
         echo $tax > {output.taxid}
         datasets download virus genome accession $acc --filename $acc.zip
         unzip -p $acc.zip ncbi_dataset/data/genomic.fna > {output.fna}
-        rm $acc.zip        
+        rm $acc.zip 
         """
 
 rule blast:
@@ -38,13 +45,19 @@ rule blast:
         fna="fastas/{virus}.fasta",taxid="taxids/{virus}.txt"
     output:
         "blast/{virus}_blast.txt"
-    #conda:
-    #    "envs/blast.yaml"
     shell:
         """
+        mkdir -p logs
         mkdir -p blast
         tax=$(cat {input.taxid})
-        blastn -db {config[database]} -query {input.fna} -out blast/{wildcards.virus}_blast.txt -outfmt '6 qseqid sseqid pident evalue staxids sscinames' -negative_taxids $tax -max_target_seqs 10
+        #check against refseq first, then genbank
+        blastn -db {config[refseq_database]} -query {input.fna} -out blast/{wildcards.virus}_blast.txt -outfmt '6 qseqid sacc pident evalue staxids sscinames' -negative_taxids $tax -max_target_seqs 10
+        #if refseq returns no hits, try genbank (nt_viruses has been most successful)
+        if [ $(wc -l < blast/{wildcards.virus}_blast.txt) -eq 0 ]; then
+            blastn -db {config[genbank_database]} -query {input.fna} -out blast/{wildcards.virus}_blast.txt -outfmt '6 qseqid sacc pident evalue staxids sscinames' -negative_taxids $tax -max_target_seqs 10
+            echo "Used genbank for {wildcards.virus}" >> logs/database.log
+        fi
+        #note that if both return no hits, the output file will be empty
         """
 
 rule get_outgroup:
@@ -52,15 +65,26 @@ rule get_outgroup:
         blast="blast/{virus}_blast.txt"
     output:
         og="outgroup/{virus}_outgroup.fasta"
-    #    log: "logs/get_{outgroup}.log"
-    #conda:
-    #    "envs/blast.yaml"
     shell:
         """
         mkdir -p outgroup
-        acc=$(head -n 1 {input.blast} | cut -f2 | perl -pe 's/ref//g' | perl -pe 's/\|//g')
+        mkdir -p logs
+        #if blast file is empty, write to status log and exit
+        #hopefully add another blast method at some point 
+        if [ ! -s {input.blast} ]; then
+            echo "{wildcards.virus} blast failed" > logs/{wildcards.virus}_status.log
+            exit 0
+        fi
+        #at this point nothing should be empty
+        #this command fails due to a faulty assumption about the format acc=$(head -n 1 {input.blast} | cut -f2 | perl -pe 's/ref//g' | perl -pe 's/\|//g')
+        acc=$(head -n 1 {input.blast} | cut -f2 )
+        if [[ $acc != *.* ]]; then
+            acc="$acc.1"
+        fi
+        #check if outgroup fasta already downloaded
+        #this doent do anything rn since fastas arent named by accession.
         if [ ! -f fastas/$acc.fasta ]; then
-            datasets download virus genome accession $acc --filename $acc.zip
+            timeout 5m datasets download virus genome accession $acc --filename $acc.zip
             unzip -p $acc.zip ncbi_dataset/data/genomic.fna > {output.og}
             rm $acc.zip
         else
@@ -74,10 +98,12 @@ rule align:
         ref="fastas/{virus}.fasta"
     output:
         "outgroup/{virus}_aligned_outgroup.fasta"
+    log:
+        "logs/{virus}_align.log"
     shell:
         """
         cat {input.ref} {input.og} > outgroup/{wildcards.virus}_to_align.fasta
-        mafft outgroup/{wildcards.virus}_to_align.fasta > {output}
+        mafft outgroup/{wildcards.virus}_to_align.fasta > {output} 2> {log}
         rm outgroup/{wildcards.virus}_to_align.fasta
         """
 
@@ -89,9 +115,11 @@ rule make_vcf:
         vcf="outgroup/{virus}_outgroup.vcf"
 
         #newtree = os.path.join(config["data_dir"], "{virus}/outgroup_optimized.pb.gz")
+    log:
+        "logs/{virus}_faToVcf.log"
     shell:
         """
-        faToVcf {input.og} outgroup/{wildcards.virus}_outgroup.vcf
+        faToVcf {input.og} outgroup/{wildcards.virus}_outgroup.vcf 2> {log}
         """
 
 
@@ -105,7 +133,7 @@ rule usher:
 
     shell:
         """
-        usher-sampled -i {input.tree} -v outgroup/{wildcards.virus}_outgroup.vcf -o {output.newtree}
+        usher-sampled -i {input.tree} -v outgroup/{wildcards.virus}_outgroup.vcf -o {output.newtree} -T 1
         """
 
 rule reroot:
@@ -121,42 +149,46 @@ rule reroot:
         matUtils extract -i {input.tree} -y $newroot -o {output.newtree}
         """
 
+'''
 rule convert:
     input:
-        tree = os.path.join(config["data_dir"], "{virus}/rerooted_outgroup_optimized.pb.gz")
+        tree = os.path.join(config["data_dir"], "{virus}/rerooted_outgroup_optimized.pb.gz"),
+        metadata = os.path.join(config["data_dir"], "{virus}/metadata.tsv.gz")
     output:
-        jsonl = os.path.join(config["data_dir"], "{virus}/{virus}_rerooted_outgroup_optimized.jsonl.gz")
+        jsonl = os.path.join(config["data_dir"], "{virus}/{virus}_rerooted_outgroup_optimized.jsonl.gz"),status="logs/{virus}_status.log"
+    log:
+        "logs/{virus}_convert.log"
     shell:
         """
-        usher_to_taxonium -i {input.tree} -o {output.jsonl}
+        echo "{wildcards.virus} conversion started" > logs/{wildcards.virus}_jsonl.log
+        header=$(zcat {input.metadata} | head -n 1 | tr '\t' ',' )
+        echo $header > logs/${wildcards.virus}_header.log
+        (usher_to_taxonium -i {input.tree} -m {input.metadata} -c $header -t {wildcards.virus} -o {output.jsonl}  > {log} 2>&1)
+        echo "Converted {wildcards.virus} to jsonl" > logs/{wildcards.virus}_status.log
+        """
+'''
+
+rule convert:
+    input:
+        tree=os.path.join(config["data_dir"], "{virus}/rerooted_outgroup_optimized.pb.gz"),
+        metadata=os.path.join(config["data_dir"], "{virus}/metadata.tsv.gz")
+    output:
+        jsonl=os.path.join(config["data_dir"], "{virus}/{virus}_rerooted_outgroup_optimized.jsonl.gz"),
+        status="logs/{virus}_status.log"
+    log:
+        "logs/{virus}_convert.log"
+    shell:
+        """
+        # Run usher_to_taxonium, redirect stdout+stderr to the log
+        usher_to_taxonium -i {input.tree} -m {input.metadata} -c {config[header]} -t {wildcards.virus} -o {output.jsonl} >> {log} 2>&1
+        # Mark completion only if previous command succeeded
+        #if [ $? -eq 0 ]; then
+        echo "Converted {wildcards.virus} to jsonl" > {output.status}
+        #else
+        #    echo "{wildcards.virus} conversion failed" >> {log} 2>&1
+        #    exit 1
+        #fi
         """
 
 
-# rule extract_accessions:
-#     input:
-#         expand("{datadir}/{virus}/output_stats.tsv", virus=config["viruses"], datadir=config["data_dir"])
-#     output:
-#         "accessions.txt"
-#     shell:
-#         """
-#         for virus in {config[viruses]}; do
-#             echo -n "$virus: "
-#             sed -n '2p' {config[data_dir]}/$virus/output_stats.tsv | cut -f1
-#         done > {output}
-#         """
 
-# rule get_fastas:
-#     input:
-#         "accessions.txt"
-#     output:
-#         directory("fastas")
-#     conda:
-#         "envs/blast.yaml"
-#     shell:
-#         """
-#         mkdir -p fastas
-#         while read line; do
-#             acc=$(echo $line | cut -d':' -f2 | tr -d ' ')
-#             efetch -db nucleotide -id $acc -format fasta > fastas/$acc.fasta
-#         done < {input}
-#         """

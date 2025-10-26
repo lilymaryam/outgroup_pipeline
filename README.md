@@ -1,54 +1,41 @@
-This is my pipeline for finding outgroups for 432 viral MATS for the viral usher trees project. 
-**Note! my pipeline is currently using usher locally built.**
-**conda installation of usher failed on phoenix. unclear if due to conda issues or server. i built usher with a conda local build in base and fixed a dependenccy issue with the commands below:**
-`conda install -c conda-forge boost-cpp=1.76`
-`export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATHcs`
-**note: disregard above, now i am doing a local build from my blast_env**
+# NCBI Datasets
 
-## Make a database for blast
-Database can be placed anywhere. path to this database should be added to config file. 
+https://www.ncbi.nlm.nih.gov/datasets
 
-### BLAST user guide
-https://www.ncbi.nlm.nih.gov/books/NBK569850/
+This zip archive contains an NCBI Datasets Data Package.
 
-## actually worked this time
-get refseq viral fastas
-`wget ftp://ftp.ncbi.nlm.nih.gov/refseq/release/viral/viral.*.genomic.fna.gz`
-`gunzip viral.*.genomic.fna.gz`
-`wget https://ftp.ncbi.nih.gov/pub/taxonomy/accession2taxid/nucl_gb.accession2taxid.gz`
-`gunzip nucl_gb.accession2taxid.gz`
-`wget ftp://ftp.ncbi.nlm.nih.gov/blast/db/taxdb.tar.gz`
-`tar -xzvf taxdb.tar.gz`
-**assuming building in current dir with all files**
-this might actually be missing a step. acc2taxid is too many columns
-`makeblastdb   -in viral.1.1.genomic.fna   -dbtype nucl   -parse_seqids   -taxid_map nucl_gb.accession2taxid   -out viral_taxid_db`
-**important!!!! should be an absolute path**
-`export BLASTDB=/path/to/dir/with/db/and/taxdb/files/`
+NCBI Datasets Data Packages can include sequence, annotation and other data files, and metadata in one or more data report files.
+Data report files are in JSON Lines format.
 
-To Do:
-[ ] rewrite rule so that all trees have titles in taxonium (ASAP!!!)
-[ ] make contingencies for edge cases 
-[ ] figure out whats failing and whats working
-[ ] improve documentation
-[ ] imporve i/o
-[ ] control resources
-[ ] figure out dependencies
+---
+## FAQs
+### Where is the data I requested?
 
-### Notes on data:
-Questions i have:
-how were these refs chosen? are they whole genomes or pieces 
+Your data is in the subdirectory `ncbi_dataset/data/` contained within this zip archive.
 
-233 samples do not get blast results. i am examining these to understand if there are no good options or if something else is wrong
+### I still can't find my data, can you help?
 
-#### Norovirus_GV (and probably all others): 
-**there are 10 norovirus trees and all of them failed to get a blast result**
-**multi tree viruses are not working in the current set up**
-The taxonomy id in the config.toml file might be wrong? when i run a browser blast i get DQ285629.1 as the suggested outgroup. its already in the tree and its already rooted there. i wonder if this tree needs a reroot? i also wonder if this tree has more than 1 taxid though 
-**norovirus may need more processing**
+We have identified a bug affecting Mac Safari users. When downloading data from the NCBI Datasets web interface, you may see only this README file after the download has completed (while other files appear to be missing).
+As a workaround to prevent this issue from recurring, we recommend disabling automatic zip archive extraction in Safari until Apple releases a bug fix.
+For more information, visit:
+https://www.ncbi.nlm.nih.gov/datasets/docs/reference-docs/mac-zip-bug/
 
-#### Rotovirus
-blast didn't work locally. worked in browser but result did not change root sufficiently. not an appropriate choice ?
+### How do I work with JSON Lines data reports?
 
+Visit our JSON Lines data report documentation page:
+https://www.ncbi.nlm.nih.gov/datasets/docs/v2/tutorials/working-with-jsonl-data-reports/
 
+### What is NCBI Datasets?
 
+NCBI Datasets is a resource that lets you easily gather data from across NCBI databases. Find and download gene, transcript, protein and genome sequences, annotation and metadata.
 
+### Where can I find NCBI Datasets documentation?
+
+Visit the NCBI Datasets documentation pages:
+https://www.ncbi.nlm.nih.gov/datasets/docs/
+
+---
+
+National Center for Biotechnology Information
+National Library of Medicine
+info@ncbi.nlm.nih.gov
