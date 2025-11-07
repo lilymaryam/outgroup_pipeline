@@ -4,7 +4,7 @@ configfile: "config.yaml"
 
 rule all:
     input:
-        expand("logs/{virus}_status.log", virus=config["viruses"])
+        expand("logs/{virus}_status.log", virus=config["viruses"][:15])
 
         #expand("blast/{virus}_blast.txt", virus=config["viruses"][:10])
 
@@ -78,9 +78,16 @@ rule get_outgroup:
         #at this point nothing should be empty
         #this command fails due to a faulty assumption about the format acc=$(head -n 1 {input.blast} | cut -f2 | perl -pe 's/ref//g' | perl -pe 's/\|//g')
         acc=$(head -n 1 {input.blast} | cut -f2 )
+
+        #this will overload the api if too many requests are made at once
         if [[ $acc != *.* ]]; then
-            acc="$acc.1"
+            acc=$(esearch -db nuccore -query $acc | efetch -format acc | head -n 1)
         fi
+        echo $acc > outgroup/{wildcards.virus}_acc.txt
+        #old method new version above
+        #if [[ $acc != *.* ]]; then
+        #    acc="$acc.1"
+        #fi
         #check if outgroup fasta already downloaded
         #this doent do anything rn since fastas arent named by accession.
         if [ ! -f fastas/$acc.fasta ]; then
@@ -91,6 +98,22 @@ rule get_outgroup:
             cp fastas/$acc.fasta {output.og}
         fi
         """
+
+'''
+rule get_outgroup_versions:
+    input:
+        og="outgroup/{virus}_outgroup.fasta"
+    output:
+        og_v="outgroup/{virus}_outgroup_versions.txt"
+    shell:
+        """
+        mkdir -p outgroup
+        mkdir -p logs
+        #get all version numbers for outgroup sequence
+        acc=$(head -n 1 outgroup/{wildcards.virus}_acc.txt)
+        esearch -db nuccore -query $acc | efetch -format accver > {output.og_v}
+        """
+'''
 
 rule align:
     input:
@@ -144,6 +167,8 @@ rule reroot:
         newtree = os.path.join(config["data_dir"], "{virus}/rerooted_outgroup_optimized.pb.gz")
     shell:
         """
+        mkdir -p samples
+        matUtils summary -i {input.tree} -s samples/{wildcards.virus}_summary.txt
         newroot=$(head -n 1 {input.og} | cut -d ' ' -f1 | perl -pe 's/>//g')
         echo $newroot
         matUtils extract -i {input.tree} -y $newroot -o {output.newtree}
