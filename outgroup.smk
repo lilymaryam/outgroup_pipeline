@@ -4,7 +4,7 @@ configfile: "config.yaml"
 
 rule all:
     input:
-        expand("logs/{virus}_status.log", virus=config["viruses"][:15])
+        expand("logs/{virus}_status.log", virus=config["viruses"])
 
         #expand("blast/{virus}_blast.txt", virus=config["viruses"][:10])
 
@@ -27,6 +27,8 @@ rule get_virus:
         tsv = os.path.join(config["data_dir"], "{virus}/config.toml")
     output:
         fna="fastas/{virus}.fasta", taxid="taxids/{virus}.txt"
+    log:
+        "logs/{virus}_get_virus.log"
     shell:
         """
         mkdir -p fastas
@@ -34,10 +36,17 @@ rule get_virus:
         # Extract accession from TSV
         acc=$(grep refseq_acc {input.tsv} | cut -d'=' -f2 | tr -d ",' ")
         tax=$(grep taxonomy_id {input.tsv} | cut -d'=' -f2 | tr -d ",' ")
+        if [ -f "fasta/{wildcards.virus}.fasta" ] && [ -f "taxids/{wildcards.virus}.txt" ]; then
+            echo "Already have fasta and taxid for {wildcards.virus} >> {log}"
+            exit 0
+        else
+            echo "Downloading fasta for {wildcards.virus} with accession $acc >> {log}"
+        fi
         echo $tax > {output.taxid}
         datasets download virus genome accession $acc --filename $acc.zip
         unzip -p $acc.zip ncbi_dataset/data/genomic.fna > {output.fna}
         rm $acc.zip 
+        ln -sf {output.fna} fastas/$acc.fasta
         """
 
 rule blast:
@@ -45,6 +54,8 @@ rule blast:
         fna="fastas/{virus}.fasta",taxid="taxids/{virus}.txt"
     output:
         "blast/{virus}_blast.txt"
+    log:
+        "logs/{virus}_blast.log"
     shell:
         """
         mkdir -p logs
@@ -55,7 +66,9 @@ rule blast:
         #if refseq returns no hits, try genbank (nt_viruses has been most successful)
         if [ $(wc -l < blast/{wildcards.virus}_blast.txt) -eq 0 ]; then
             blastn -db {config[genbank_database]} -query {input.fna} -out blast/{wildcards.virus}_blast.txt -outfmt '6 qseqid sacc pident evalue staxids sscinames' -negative_taxids $tax -max_target_seqs 10
-            echo "Used genbank for {wildcards.virus}" >> logs/database.log
+            echo "Used genbank for {wildcards.virus}" >> {log}
+        else
+            echo "Used refseq for {wildcards.virus}" >> {log}
         fi
         #note that if both return no hits, the output file will be empty
         """
@@ -64,7 +77,12 @@ rule get_outgroup:
     input:
         blast="blast/{virus}_blast.txt"
     output:
-        og="outgroup/{virus}_outgroup.fasta"
+        og="outgroup/{virus}_outgroup.fasta",accesion_file="outgroup/{virus}_acc.txt"
+        #og="outgroup/{virus}_acc.txt",
+    resources:
+        ncbi=1
+    log:
+        "logs/{virus}_get_outgroup.log"
     shell:
         """
         mkdir -p outgroup
@@ -76,44 +94,31 @@ rule get_outgroup:
             exit 0
         fi
         #at this point nothing should be empty
-        #this command fails due to a faulty assumption about the format acc=$(head -n 1 {input.blast} | cut -f2 | perl -pe 's/ref//g' | perl -pe 's/\|//g')
         acc=$(head -n 1 {input.blast} | cut -f2 )
-
+        #
         #this will overload the api if too many requests are made at once
+        #overcome this if --resources ncbi=1 is set in the command 
         if [[ $acc != *.* ]]; then
             acc=$(esearch -db nuccore -query $acc | efetch -format acc | head -n 1)
         fi
-        echo $acc > outgroup/{wildcards.virus}_acc.txt
+        #
+        echo $acc > {output.accesion_file}
         #old method new version above
         #if [[ $acc != *.* ]]; then
         #    acc="$acc.1"
         #fi
         #check if outgroup fasta already downloaded
-        #this doent do anything rn since fastas arent named by accession.
+        #
         if [ ! -f fastas/$acc.fasta ]; then
             timeout 5m datasets download virus genome accession $acc --filename $acc.zip
             unzip -p $acc.zip ncbi_dataset/data/genomic.fna > {output.og}
             rm $acc.zip
+            echo "Downloaded outgroup $acc for {wildcards.virus}" >> {log}
         else
             cp fastas/$acc.fasta {output.og}
+            echo "Already had $acc for {wildcards.virus}" >> {log}
         fi
         """
-
-'''
-rule get_outgroup_versions:
-    input:
-        og="outgroup/{virus}_outgroup.fasta"
-    output:
-        og_v="outgroup/{virus}_outgroup_versions.txt"
-    shell:
-        """
-        mkdir -p outgroup
-        mkdir -p logs
-        #get all version numbers for outgroup sequence
-        acc=$(head -n 1 outgroup/{wildcards.virus}_acc.txt)
-        esearch -db nuccore -query $acc | efetch -format accver > {output.og_v}
-        """
-'''
 
 rule align:
     input:
@@ -153,25 +158,29 @@ rule usher:
     output:
         newtree = os.path.join(config["data_dir"], "{virus}/outgroup_optimized.pb.gz")
         #vcf="outgroup/{virus}_outgroup.vcf"
-
+    log:
+        "logs/{virus}_usher.log"
     shell:
         """
-        usher-sampled -i {input.tree} -v outgroup/{wildcards.virus}_outgroup.vcf -o {output.newtree} -T 1
+        usher-sampled -i {input.tree} -v outgroup/{wildcards.virus}_outgroup.vcf -o {output.newtree} -T 1 2> {log}
         """
 
 rule reroot:
     input:
         tree = os.path.join(config["data_dir"], "{virus}/outgroup_optimized.pb.gz"),
-        og="outgroup/{virus}_outgroup.fasta"
+        og="outgroup/{virus}_outgroup.fasta",accession="outgroup/{virus}_acc.txt"
     output:
         newtree = os.path.join(config["data_dir"], "{virus}/rerooted_outgroup_optimized.pb.gz")
+    log:
+        "logs/{virus}_reroot.log"
     shell:
         """
+        acc=$(cat {input.accession})
         mkdir -p samples
         matUtils summary -i {input.tree} -s samples/{wildcards.virus}_summary.txt
-        newroot=$(head -n 1 {input.og} | cut -d ' ' -f1 | perl -pe 's/>//g')
-        echo $newroot
-        matUtils extract -i {input.tree} -y $newroot -o {output.newtree}
+        newroot=$(grep $acc samples/{wildcards.virus}_summary.txt | cut -f3)
+        #newroot=$(head -n 1 {input.og} | cut -d ' ' -f1 | perl -pe 's/>//g')
+        matUtils extract -i {input.tree} -y $newroot -o {output.newtree} 2> {log}
         """
 
 '''
