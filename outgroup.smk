@@ -2,6 +2,7 @@ import os
 
 configfile: "config.yaml"
 
+#note: this isnt done yet. i need it to deal with sample dropout from blast. i dont think rule all should rely on logs either?
 rule all:
     input:
         expand("logs/{virus}_status.log", virus=config["viruses"])
@@ -170,7 +171,7 @@ rule reroot:
         tree = os.path.join(config["data_dir"], "{virus}/outgroup_optimized.pb.gz"),
         og="outgroup/{virus}_outgroup.fasta",accession="outgroup/{virus}_acc.txt"
     output:
-        newtree = os.path.join(config["data_dir"], "{virus}/rerooted_outgroup_optimized.pb.gz")
+        newtree = os.path.join(config["data_dir"], "{virus}/rerooted_outgroup_optimized.pb.gz"), reffile=os.path.join(config["data_dir"], "{virus}/reference.fasta"), no_og_tree=os.path.join(config["data_dir"], "{virus}/rerooted_no_outgroup_optimized.pb.gz")
     log:
         "logs/{virus}_reroot.log"
     shell:
@@ -180,7 +181,9 @@ rule reroot:
         matUtils summary -i {input.tree} -s samples/{wildcards.virus}_summary.txt
         newroot=$(grep $acc samples/{wildcards.virus}_summary.txt | cut -f3)
         #newroot=$(head -n 1 {input.og} | cut -d ' ' -f1 | perl -pe 's/>//g')
-        matUtils extract -i {input.tree} -y $newroot -o {output.newtree} 2> {log}
+        #matUtils extract -i {input.tree} -y $newroot -o {output.newtree} 2> {log}
+        matUtils extract -i {input.tree} -y $newroot --write-reroot-reference {output.reffile} --input-fasta fastas/{wildcards.virus}.fasta -o {output.newtree} 2> {log}
+        matUtils extract -i {input.tree} -s {input.accession} -p -o {output.no_og_tree} >> {log} 2>&1
         """
 
 '''
