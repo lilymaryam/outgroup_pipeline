@@ -30,6 +30,13 @@ rule get_virus:
         fna="fastas/{virus}.fasta", taxid="taxids/{virus}.txt"
     log:
         "logs/{virus}_get_virus.log"
+    conda:
+        "envs/blast.yaml"
+    resources:
+        mem_mb=4000,
+        runtime=720,
+        slurm_partition="medium",
+        slurm_extra="--export=ALL",
     shell:
         """
         mkdir -p fastas
@@ -50,6 +57,7 @@ rule get_virus:
         ln -sf {output.fna} fastas/$acc.fasta
         """
 
+#use one database? 2 databasees encourages refseq outgroups before rando genbank 
 rule blast:
     input:
         fna="fastas/{virus}.fasta",taxid="taxids/{virus}.txt"
@@ -57,6 +65,13 @@ rule blast:
         "blast/{virus}_blast.txt"
     log:
         "logs/{virus}_blast.log"
+    conda:
+        "envs/blast.yaml"
+    resources:
+        mem_mb=4000,
+        runtime=720,
+        slurm_partition="medium",
+        slurm_extra="--export=ALL",
     shell:
         """
         mkdir -p logs
@@ -65,13 +80,20 @@ rule blast:
         #check against refseq first, then genbank
         blastn -db {config[refseq_database]} -query {input.fna} -out blast/{wildcards.virus}_blast.txt -outfmt '6 qseqid sacc pident evalue staxids sscinames' -negative_taxids $tax -max_target_seqs 10
         #if refseq returns no hits, try genbank (nt_viruses has been most successful)
+        #turn this off for now
         if [ $(wc -l < blast/{wildcards.virus}_blast.txt) -eq 0 ]; then
             blastn -db {config[genbank_database]} -query {input.fna} -out blast/{wildcards.virus}_blast.txt -outfmt '6 qseqid sacc pident evalue staxids sscinames' -negative_taxids $tax -max_target_seqs 10
             echo "Used genbank for {wildcards.virus}" >> {log}
         else
             echo "Used refseq for {wildcards.virus}" >> {log}
         fi
-        #note that if both return no hits, the output file will be empty
+        #note that if blast return no hits, the output file will be empty
+        #if [ $(wc -l < blast/{wildcards.virus}_blast.txt) -eq 0 ]; then
+        #    blastn -db {config[genbank_database]} -query {input.fna} -out blast/{wildcards.virus}_blast.txt -outfmt '6 qseqid sacc pident evalue staxids sscinames' -negative_taxids $tax -max_target_seqs 10
+        #    echo "Blast didn't work for {wildcards.virus}" >> {log}
+        #else
+        #    echo "Used refseq for {wildcards.virus}" >> {log}
+        #fi
         """
 
 rule get_outgroup:
@@ -80,10 +102,16 @@ rule get_outgroup:
     output:
         og="outgroup/{virus}_outgroup.fasta",accesion_file="outgroup/{virus}_acc.txt"
         #og="outgroup/{virus}_acc.txt",
-    resources:
-        ncbi=1
     log:
         "logs/{virus}_get_outgroup.log"
+    conda:
+        "envs/blast.yaml"
+    resources:
+        ncbi=1,
+        mem_mb=4000,
+        runtime=720,
+        slurm_partition="medium",
+        slurm_extra="--export=ALL",
     shell:
         """
         mkdir -p outgroup
@@ -129,6 +157,13 @@ rule align:
         "outgroup/{virus}_aligned_outgroup.fasta"
     log:
         "logs/{virus}_align.log"
+    conda:
+        "envs/blast.yaml"
+    resources:
+        mem_mb=4000,
+        runtime=720,
+        slurm_partition="medium",
+        slurm_extra="--export=ALL",
     shell:
         """
         cat {input.ref} {input.og} > outgroup/{wildcards.virus}_to_align.fasta
@@ -146,6 +181,13 @@ rule make_vcf:
         #newtree = os.path.join(config["data_dir"], "{virus}/outgroup_optimized.pb.gz")
     log:
         "logs/{virus}_faToVcf.log"
+    conda:
+        "envs/blast.yaml"
+    resources:
+        mem_mb=4000,
+        runtime=720,
+        slurm_partition="medium",
+        slurm_extra="--export=ALL",
     shell:
         """
         faToVcf {input.og} outgroup/{wildcards.virus}_outgroup.vcf 2> {log}
@@ -157,23 +199,40 @@ rule usher:
         og="outgroup/{virus}_outgroup.vcf",
         tree = os.path.join(config["data_dir"], "{virus}/optimized.pb.gz")
     output:
-        newtree = os.path.join(config["data_dir"], "{virus}/outgroup_optimized.pb.gz")
+        newtree = "outgrouped_trees/{virus}/outgroup_optimized.pb.gz"
         #vcf="outgroup/{virus}_outgroup.vcf"
     log:
         "logs/{virus}_usher.log"
+    conda:
+        "envs/blast.yaml"
+    resources:
+        mem_mb=250000,
+        runtime=720,
+        slurm_partition="medium",
+        slurm_extra="--export=ALL",
+    singularity:
+        "docker://pathogengenomics/usher:latest"
     shell:
         """
+        mkdir -p outgrouped_trees/{wildcards.virus}
         usher-sampled -i {input.tree} -v outgroup/{wildcards.virus}_outgroup.vcf -o {output.newtree} -T 1 2> {log}
         """
 
 rule reroot:
     input:
-        tree = os.path.join(config["data_dir"], "{virus}/outgroup_optimized.pb.gz"),
+        tree = "outgrouped_trees/{virus}/outgroup_optimized.pb.gz",
         og="outgroup/{virus}_outgroup.fasta",accession="outgroup/{virus}_acc.txt"
     output:
-        newtree = os.path.join(config["data_dir"], "{virus}/rerooted_outgroup_optimized.pb.gz"), reffile=os.path.join(config["data_dir"], "{virus}/reference.fasta"), no_og_tree=os.path.join(config["data_dir"], "{virus}/rerooted_no_outgroup_optimized.pb.gz")
+        newtree = "outgrouped_trees/{virus}/rerooted_outgroup_optimized.pb.gz", reffile="outgrouped_trees/{virus}/reference.fasta", no_og_tree="outgrouped_trees/{virus}/rerooted_no_outgroup_optimized.pb.gz"
     log:
         "logs/{virus}_reroot.log"
+    conda:
+        "envs/blast.yaml"
+    resources:
+        mem_mb=4000,
+        runtime=720,
+        slurm_partition="medium",
+        slurm_extra="--export=ALL",
     shell:
         """
         acc=$(cat {input.accession})
@@ -183,37 +242,25 @@ rule reroot:
         #newroot=$(head -n 1 {input.og} | cut -d ' ' -f1 | perl -pe 's/>//g')
         #matUtils extract -i {input.tree} -y $newroot -o {output.newtree} 2> {log}
         matUtils extract -i {input.tree} -y $newroot --write-reroot-reference {output.reffile} --input-fasta fastas/{wildcards.virus}.fasta -o {output.newtree} 2> {log}
-        matUtils extract -i {input.tree} -s {input.accession} -p -o {output.no_og_tree} >> {log} 2>&1
+        matUtils extract -i {output.newtree} -s {input.accession} -p -o {output.no_og_tree} >> {log} 2>&1
         """
-
-'''
-rule convert:
-    input:
-        tree = os.path.join(config["data_dir"], "{virus}/rerooted_outgroup_optimized.pb.gz"),
-        metadata = os.path.join(config["data_dir"], "{virus}/metadata.tsv.gz")
-    output:
-        jsonl = os.path.join(config["data_dir"], "{virus}/{virus}_rerooted_outgroup_optimized.jsonl.gz"),status="logs/{virus}_status.log"
-    log:
-        "logs/{virus}_convert.log"
-    shell:
-        """
-        echo "{wildcards.virus} conversion started" > logs/{wildcards.virus}_jsonl.log
-        header=$(zcat {input.metadata} | head -n 1 | tr '\t' ',' )
-        echo $header > logs/${wildcards.virus}_header.log
-        (usher_to_taxonium -i {input.tree} -m {input.metadata} -c $header -t {wildcards.virus} -o {output.jsonl}  > {log} 2>&1)
-        echo "Converted {wildcards.virus} to jsonl" > logs/{wildcards.virus}_status.log
-        """
-'''
 
 rule convert:
     input:
-        tree=os.path.join(config["data_dir"], "{virus}/rerooted_outgroup_optimized.pb.gz"),
+        tree="outgrouped_trees/{virus}/rerooted_outgroup_optimized.pb.gz",
         metadata=os.path.join(config["data_dir"], "{virus}/metadata.tsv.gz")
     output:
-        jsonl=os.path.join(config["data_dir"], "{virus}/{virus}_rerooted_outgroup_optimized.jsonl.gz"),
+        jsonl="outgrouped_trees/{virus}/{virus}_rerooted_outgroup_optimized.jsonl.gz",
         status="logs/{virus}_status.log"
     log:
         "logs/{virus}_convert.log"
+    conda:
+        "envs/blast.yaml"
+    resources:
+        mem_mb=4000,
+        runtime=720,
+        slurm_partition="medium",
+        slurm_extra="--export=ALL",
     shell:
         """
         # Run usher_to_taxonium, redirect stdout+stderr to the log

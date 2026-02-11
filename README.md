@@ -54,6 +54,9 @@ To Do:
 
 
 
+# NOTES FEB 11 2026
+because of the way usher-sampled works, the local build is not compatible with slurm. my efforts to use docker usher within slurm also failed in a unclear way. The current version is running successfully with the command `snakemake -s outgroup.smk --cores 5 --rerun-incomplete -k` ( this command does not end up using docker). 
 
+If someone wanted to use a docker container in the future to run this on slurm, the command i used was `snakemake -s outgroup.smk --slurm --jobs 20 --use-singularity --singularity-args "--bind /private/groups/corbettlab/lily --cleanenv --cpus 1" --default-resources slurm_partition="medium" --resources ncbi=1 -k` this command successfully uses the singularity container for docker which did run usher sometimes and at other times usher would fail. It is not clear to me why singularity sometimes ran successfully and not others. in the logs it appeared to stop suddenly however this doesnt seem to be a memory or thread issue as it sometimes failed on small, low demand trees. To better understand this failure, i would start by looking at the container itself, however for my purposes currently it is not worth the effort to do that. 
 
 
