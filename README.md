@@ -1,62 +1,73 @@
-# This is my pipeline for finding outgroups for 432 viral MATS for the viral usher trees project. 
-**Note! my pipeline is currently using usher locally built because usher on conda fails and breaks environment.**
-**conda installation of usher failed on phoenix. unclear if due to conda issues or server. i built usher with a conda local build in base and fixed a dependenccy issue with the commands below:**
-`conda install -c conda-forge boost-cpp=1.76`
-`export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATHcs`
-**note: disregard above, now i am doing a local build from my blast_env**
+# Outgroup reroot pipeline for viral_usher_trees
 
-**note: (to myself for now) usher conda does not work. i think im doing a local build from my blast_env but i will need to try a fresh build somewhere to figure out exactly what worked**
+## Set Up
+Used UShER Conda local build instructions https://usher-wiki.readthedocs.io/en/latest/Installation.html
+UShER version 0.7.0
 
-**usher issues make running it with slurm very hard. current version not recommended for cluster**
+Conda environment 
+./envs/blast.yml
 
-## Make a database for blast
-Database can be placed anywhere. path to this database should be added to config file. DATABASE MUST HAVE appropriate taxids for anything to work. the refseq database i built has species level annotations (from what ive seen). any further databases must be carefully annotated with the correct taxids 
+### Hardware
+This code was run on a Linux server with 63 threads and 1Tb memory. Though these rules were set up to use Slurm this pipeline was run with a designated number of jobs and no cluster management. It could be adapted for Slurm.
+
+## Make databases for blast
+Databases can be placed anywhere. The path to the databases should be added to config file `./config.yaml`. DATABASE MUST HAVE appropriate taxids for anything to work. the RefSeq database I built has species level annotations.
 
 ### BLAST user guide
 https://www.ncbi.nlm.nih.gov/books/NBK569850/
 
-## Viral RefSeq BLAST database with TaxIds
-get refseq viral fastas
+### Viral RefSeq BLAST database with TaxIds
+My BLAST database built from RefSeq viral genomes (release 232, September 2025; 18,798 sequences), database constructed 2025-10-06.
+
+Make a dir for the db:
+`mkdir /path/to/dir/with/db/and/taxdb/rs_db`
+`cd /path/to/dir/with/db/and/taxdb/rs_db`
+
+Download the RefSeq viral genomes:
 `wget ftp://ftp.ncbi.nlm.nih.gov/refseq/release/viral/viral.*.genomic.fna.gz`
 `gunzip viral.*.genomic.fna.gz`
+
+Concatenate all shards into one FASTA (makeblastdb -in takes a single file, so the glob has to be merged first):
+`cat viral.*.genomic.fna > viral.all.genomic.fna`
+
+Get TaxID map 
 `wget https://ftp.ncbi.nih.gov/pub/taxonomy/accession2taxid/nucl_gb.accession2taxid.gz`
 `gunzip nucl_gb.accession2taxid.gz`
+`tail -n +2 nucl_gb.accession2taxid | cut -f2,3 > acc2taxid.2col`
 `wget ftp://ftp.ncbi.nlm.nih.gov/blast/db/taxdb.tar.gz`
 `tar -xzvf taxdb.tar.gz`
+
 **assuming building in current dir with all files**
-this might actually be missing a step. acc2taxid is too many columns
-`makeblastdb   -in viral.1.1.genomic.fna   -dbtype nucl   -parse_seqids   -taxid_map nucl_gb.accession2taxid   -out viral_taxid_db`
-**important!!!! should be an absolute path**
+`makeblastdb -in viral.all.genomic.fna -dbtype nucl -parse_seqids -taxid_map acc2taxid.2col -out viral_taxid_db`
+
+**⚠️ Set BLASTDB — required for taxid filtering**
 `export BLASTDB=/path/to/dir/with/db/and/taxdb/files/`
 
-## Secondary GenBank Database for Samples that fail first blast  
-i dont fully remember how i set this one up but its premade and once i downloaded entrez direct it started working perfectly. i should do a from scratch build so i can explain it better . i might acually only need one db 
+### Secondary GenBank Database for Samples that fail first blast
+
+This is NCBI's pre-built `nt_viruses` database (viral subset of nt), not built from scratch — NCBI compiles it and hosts it, so `update_blastdb.pl` just downloads and unpacks it. Taxonomy is already built in (v5), so no taxid_map step is needed here.
+
+**Prerequisite:** edirect must be available — it's in the conda env (envs/blast.yaml), so activate that first.
+
+`update_blastdb.pl` downloads into the current working directory, so cd into the target directory first.
 `update_blastdb.pl --decompress nt_viruses`
 
-## Running with refseq first appears to be appropriate. its much faster and refseq sequences can be relied on. it may be worth running some things with both. still unclear how to deal with qc for some outgroups. 
+**Note:** there's no version number like RefSeq has, so write down the download date instead. Check it with `blastdbcmd -db nt_viruses -info` (Date field). This one: Sep 15, 2025.
+
+**Final DB step: Add database paths to config variables refseq_db and genbank_db**
+
+## Running outgroup_pipeline on all of viral_usher_trees 
+First clone data to a dir of your choosing. Dataset is large--make sure to have adequate space.
+`git clone https://github.com/AngieHinrichs/viral_usher_trees.git`
+Set up this dir so that you can git pull on a monthly basis to get the most up-to-date dataset. This is less important if this is a one-time run. 
+
+Record path to data in config.yaml variable `data_dir`. 
+
+Config.yaml lists all viruses being tracked. If new viral trees are added, this will need to be updated in config.yaml or they will be skipped. 
+This also means that config.yaml can be modified to focus on certain viruses. 
+
+To run this snakemake pipeline the commmand `snakemake -s outgroup.smk --cores {n cores} --resources ncbi=1 --rerun-incomplete -k` will successfully run. The pipeline handles sample dropout by tracking logfiles instead of outputs. To identify sample dropouts, the log files can be queried for failures. This pipeline runs well on Linux servers and naturally accounts for ncbi resource request limits. It currently is not set up to run on a cluster if the login node is low-resource. This pipeline would need to be modified for that purpose. 
 
 ## Post outgrouping:
-70 trees do not get a blast result. 40 of these are influenza. i need to address this
-
-of the 354 trees. a certain number are not appearing to be reasonably outgrouped. I wrote check trees to get a sense of these ones. checktrees.py is still an estimate though. 
-
-
-
-
-To Do:
-[ ] rewrite rule so that all trees have titles in taxonium (ASAP!!!)
-[ ] make contingencies for edge cases 
-[ ] figure out whats failing and whats working
-[ ] improve documentation
-[ ] imporve i/o
-[ ] control resources
-[ ] figure out dependencies
-
-
-
-# NOTES FEB 11 2026
-because of the way usher-sampled works, the local build is not compatible with slurm. my efforts to use docker usher within slurm also failed in a unclear way. The current version is running successfully with the command `snakemake -s outgroup.smk --cores 5 --rerun-incomplete -k` ( this command does not end up using docker). 
-
-If someone wanted to use a docker container in the future to run this on slurm, the command i used was `snakemake -s outgroup.smk --slurm --jobs 20 --use-singularity --singularity-args "--bind /private/groups/corbettlab/lily --cleanenv --cpus 1" --default-resources slurm_partition="medium" --resources ncbi=1 -k` this command successfully uses the singularity container for docker which did run usher sometimes and at other times usher would fail. It is not clear to me why singularity sometimes ran successfully and not others. in the logs it appeared to stop suddenly however this doesnt seem to be a memory or thread issue as it sometimes failed on small, low demand trees. To better understand this failure, i would start by looking at the container itself, however for my purposes currently it is not worth the effort to do that. 
-
+70 trees do not get a blast result. 40 of these are influenza. Failure to find outgroups is somewhat expected as we can only find a suitable outgroup if there is a viral sequence resembling but outside of the species TaxID of our virus of interest. The goal with candidate outgroups is to observe if the closest matching non-relative is a possible outgroup. Final decisions are currently made with comparison to other suitable but imperfect approaches. Ideal result is concordance among multiple approaches. 
 
